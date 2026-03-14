@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>AI Workspace - Pro Studio</title>
+    <script src="https://accounts.google.com/gsi/client" onload="initClient()"></script>
+    <style>
+        :root { --primary: #818cf8; --bg: #020617; --card: #1e293b; --text: #f8fafc; --accent: #10b981; --error: #ef4444; }
+        body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); margin: 0; display: flex; height: 100vh; overflow: hidden; }
+        
+        /* Sidebar Layout */
+        .sidebar { width: 380px; background: #0f172a; padding: 20px; border-right: 1px solid #334155; display: flex; flex-direction: column; overflow-y: auto; box-sizing: border-box; }
+        .main { flex: 1; display: flex; flex-direction: column; padding: 25px; box-sizing: border-box; }
+        .chat-container { flex: 1; background: #0b1120; border-radius: 12px; padding: 20px; overflow-y: auto; border: 1px solid #1e293b; margin-bottom: 20px; }
+        
+        /* Direct Portal Button Styling */
+        .portal-card { background: #1e293b; border-radius: 12px; padding: 15px; margin-top: 20px; border: 1px solid #334155; }
+        .btn-portal { 
+            display: flex; align-items: center; justify-content: center; gap: 10px;
+            background: #4f46e5; color: white; text-decoration: none; padding: 12px; 
+            border-radius: 8px; font-weight: bold; font-size: 0.85rem; transition: transform 0.2s, background 0.2s;
+        }
+        .btn-portal:hover { background: #6366f1; transform: translateY(-2px); }
+        .portal-icon { font-size: 1.2rem; }
+
+        /* UI Elements */
+        .category-title { font-size: 0.7rem; color: var(--primary); text-transform: uppercase; letter-spacing: 1.5px; margin: 15px 0 8px 0; font-weight: 800; }
+        .template-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+        .template-btn { background: #1e293b; color: #cbd5e1; border: 1px solid #334155; border-radius: 6px; padding: 8px; font-size: 0.75rem; cursor: pointer; text-align: left; }
+        .msg { margin-bottom: 20px; border-bottom: 1px solid #1e293b; padding-bottom: 15px; }
+        .ai-label { color: var(--accent); font-weight: 800; font-size: 0.7rem; text-transform: uppercase; }
+        .code-view { background: #000; color: #4ade80; padding: 15px; border-radius: 8px; font-family: monospace; font-size: 0.8rem; margin: 10px 0; overflow-x: auto; }
+        textarea { width: 100%; height: 80px; background: #1e293b; border: 1px solid #334155; color: white; border-radius: 8px; padding: 12px; resize: none; font-size: 1rem; }
+        .btn-send { background: var(--primary); color: white; padding: 15px; width: 100%; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; margin-top: 10px; }
+    </style>
+</head>
+<body>
+
+<div class="sidebar">
+    <h3 style="margin-top:0">🔑 Configuration</h3>
+    <input type="text" id="clientId" style="width:100%; padding:10px; background:#020617; border:1px solid #334155; color:white; border-radius:4px;" placeholder="Google Client ID">
+    <button onclick="saveConfig()" style="width:100%; padding:8px; background:#475569; color:white; border:none; cursor:pointer; margin-top:8px; border-radius:4px; font-weight:bold;">Link Account</button>
+
+    <div class="category-title">Templates</div>
+    <div class="template-grid">
+        <button class="template-btn" onclick="setPrompt('Create a Google Sheet of top 10 tech stocks.')">📈 Stocks</button>
+        <button class="template-btn" onclick="setPrompt('Create a Google Form survey.')">📝 Survey</button>
+        <button class="template-btn" onclick="setPrompt('Generate a 5-slide PPT on AI.')">☀️ Slides</button>
+        <button class="template-btn" onclick="setPrompt('Create a Portfolio Google Site.')">🌐 Site</button>
+    </div>
+
+    <div class="portal-card">
+        <div style="font-size: 0.7rem; color: #94a3b8; margin-bottom: 10px; text-transform: uppercase;">External Tools</div>
+        <a href="https://script.google.com/home" target="_blank" class="btn-portal" id="portalBtn">
+            <span class="portal-icon">🔗</span>
+            <span id="portalText">Open Apps Script Dashboard</span>
+        </a>
+        <p style="font-size: 0.65rem; color: #64748b; margin-top: 8px; text-align: center;">
+            Opens in a new tab for security compliance.
+        </p>
+    </div>
+</div>
+
+<div class="main">
+    <div class="chat-container" id="chat">
+        <div class="msg"><span class="ai-label">System</span> Ready. Once you deploy, the button on the left will highlight your active project.</div>
+    </div>
+    
+    <div class="input-wrap">
+        <textarea id="userInput" placeholder="Ask me to build something..."></textarea>
+        <button class="btn-send" id="sendBtn" onclick="handleInteraction()">Run Command</button>
+    </div>
+</div>
+
+<script>
+    const C_KEY = "csk-m5etjjpxj2mvnrw5kcwt3t5jt9h83veec9rdxr4m6fmjdv9f";
+    const C_URL = "https://api.cerebras.ai/v1/chat/completions";
+    const C_MODEL = "llama3.1-8b";
+
+    let accessToken = null;
+    let pendingCode = "";
+
+    window.onload = () => {
+        document.getElementById('clientId').value = localStorage.getItem('g_cid') || '';
+    };
+
+    function saveConfig() {
+        localStorage.setItem('g_cid', document.getElementById('clientId').value.trim());
+        alert("Synced!"); location.reload();
+    }
+
+    function setPrompt(p) { document.getElementById('userInput').value = p; }
+
+    async function handleInteraction() {
+        const input = document.getElementById('userInput').value.trim();
+        if (!input) return;
+        appendMessage("You", input);
+        document.getElementById('userInput').value = "";
+
+        try {
+            const res = await fetch(C_URL, {
+                method: "POST",
+                headers: { "Authorization": "Bearer " + C_KEY, "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    model: C_MODEL,
+                    messages: [
+                        { role: "system", content: "Expert coder. Provide explanation then RAW Apps Script code. No backticks." },
+                        { role: "user", content: input }
+                    ]
+                })
+            });
+            const data = await res.json();
+            const reply = data.choices[0].message.content.trim();
+
+            if (reply.toLowerCase().includes("function")) {
+                const parts = reply.split(/function/i);
+                pendingCode = "function " + parts.slice(1).join("function").trim();
+                appendMessage("Assistant", parts[0].trim(), pendingCode);
+            } else {
+                appendMessage("Assistant", reply);
+            }
+        } catch (e) { appendMessage("Assistant", "API Error."); }
+    }
+
+    function initClient() {
+        const cid = localStorage.getItem('g_cid');
+        if (!cid) return;
+        window.gClient = google.accounts.oauth2.initTokenClient({
+            client_id: cid,
+            scope: 'https://www.googleapis.com/auth/script.projects https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/forms',
+            callback: (token) => { accessToken = token.access_token; deployProject(); }
+        });
+    }
+
+    async function deployProject() {
+        if (!pendingCode || !accessToken) return;
+        try {
+            const res = await fetch('https://script.googleapis.com/v1/projects', {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${accessToken}` },
+                body: JSON.stringify({ title: "AI Universal Task" })
+            });
+            const project = await res.json();
+            await fetch(`https://script.googleapis.com/v1/projects/${project.scriptId}/content`, {
+                method: 'PUT',
+                headers: { 'Authorization': `Bearer ${accessToken}` },
+                body: JSON.stringify({ files: [{ name: 'main', type: 'SERVER_JS', source: pendingCode }] })
+            });
+
+            // Update the Portal Button to point to the new project
+            const portalBtn = document.getElementById('portalBtn');
+            const portalText = document.getElementById('portalText');
+            portalBtn.href = `https://script.google.com/d/${project.scriptId}/edit`;
+            portalBtn.style.background = "var(--accent)";
+            portalBtn.style.color = "#000";
+            portalText.innerText = "🚀 Go to Project Editor";
+
+            window.open(portalBtn.href, '_blank');
+        } catch (err) { alert("Deployment error."); }
+    }
+
+    function appendMessage(who, text, code = null) {
+        const chat = document.getElementById('chat');
+        const div = document.createElement('div');
+        div.className = "msg";
+        div.innerHTML = `<span class="${who === 'You' ? 'user-label' : 'ai-label'}">${who}</span><div>${text}</div>`;
+        if (code) {
+            const codeBox = document.createElement('div');
+            codeBox.className = 'code-view'; codeBox.innerText = code;
+            div.appendChild(codeBox);
+            const btn = document.createElement('button');
+            btn.className = 'btn-send'; btn.innerText = "🚀 Deploy & Open Editor";
+            btn.onclick = () => { if (!accessToken) window.gClient.requestAccessToken(); else deployProject(); };
+            div.appendChild(btn);
+        }
+        chat.appendChild(div);
+        chat.scrollTop = chat.scrollHeight;
+    }
+</script>
+
+</body>
+</html>
